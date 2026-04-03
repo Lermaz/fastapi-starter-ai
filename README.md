@@ -185,7 +185,7 @@ List supports:
 
 Workflow: [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
 
-**Triggers:** push and pull request to `main` or `master`, plus **workflow_dispatch** (manual run from the Actions tab).
+**Triggers:** push and pull request to `main`, `master`, `dev`, and `qa`, plus **workflow_dispatch** (manual run from the Actions tab).
 
 **Hardening:**
 
@@ -211,7 +211,7 @@ pytest -q
 
 Configuration: [`ruff.toml`](ruff.toml). Pytest discovers tests from [`pyproject.toml`](pyproject.toml) (`pythonpath = ["."]`) so imports work even when your IDE runs tests with a non-repo-root working directory.
 
-**Branch protection (recommended):** in GitHub repo settings, require the CI workflow to pass before merging to `main`.
+**Branch protection:** configure on GitHub for `main`, `dev`, and `qa` (not in YAML). See [`.github/branch-protection.md`](.github/branch-protection.md) for steps and required check names.
 
 ## 9) Project layout
 
@@ -243,6 +243,7 @@ alembic/
 .github/
   workflows/
     ci.yml
+  branch-protection.md
   dependabot.yml
 tests/
   test_smoke.py
