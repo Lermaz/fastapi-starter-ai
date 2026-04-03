@@ -1,0 +1,32 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: videogames
+      POSTGRES_PASSWORD: videogames
+      POSTGRES_DB: videogames
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U videogames -d videogames"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://videogames:videogames@db:5432/videogames
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-docker-compose-min-32-chars!!}
+      ENVIRONMENT: development
+      EMAIL_BACKEND: console
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:

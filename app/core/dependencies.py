@@ -1,17 +1,20 @@
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import Settings
+from app.core.config import settings as default_settings
 from app.core.permissions import Permission, permissions_for
 from app.core.security import decode_token
 from app.db.session import get_db_session
-from app.models.user import User, UserRole
+from app.models.user import User
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{default_settings.api_v1_prefix}/auth/login")
 
 
 async def get_current_user(
+    request: Request,
     token: str = Depends(oauth2_scheme),
     db_session: AsyncSession = Depends(get_db_session),
 ) -> User:
@@ -54,18 +57,15 @@ async def get_current_user(
             detail="Token has been revoked",
         )
 
+    cfg = getattr(request.app.state, "settings", None)
+    s = cfg if isinstance(cfg, Settings) else default_settings
+    if s.auth_require_email_verification and user.email_verified_at is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Email not verified",
+        )
+
     return user
-
-
-def require_role(required_role: UserRole):
-    async def role_dependency(user: User = Depends(get_current_user)) -> User:
-        if user.role != required_role:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions"
-            )
-        return user
-
-    return role_dependency
 
 
 def require_permission(*required_permissions: Permission):

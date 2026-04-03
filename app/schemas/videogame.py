@@ -1,7 +1,17 @@
 from datetime import date, datetime
 from decimal import Decimal
+from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
+
+
+class VideogameSort(StrEnum):
+    id_desc = "id_desc"
+    id_asc = "id_asc"
+    price_desc = "price_desc"
+    price_asc = "price_asc"
+    title_asc = "title_asc"
+    title_desc = "title_desc"
 
 
 class VideogameCreateRequest(BaseModel):
@@ -39,3 +49,4 @@ class VideogameResponse(BaseModel):
 class VideogameListResponse(BaseModel):
     total: int
     items: list[VideogameResponse]
+    next_cursor: str | None = None

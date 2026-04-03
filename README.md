@@ -2,14 +2,20 @@
 
 Production-style FastAPI baseline with:
 
-- healthcheck (`/health`)
-- JWT auth (access + refresh with rotation + revocation)
+- **Liveness** `GET /health` (no DB) and **readiness** `GET /ready` (DB `SELECT 1`)
+- Versioned API under **`/api/v1`** (e.g. `/api/v1/auth/login`, `/api/v1/videogames`)
+- JWT auth (access + refresh with rotation + revocation); optional **httpOnly refresh cookie** + **`X-CSRF-Token`** for browser flows (`AUTH_REFRESH_COOKIE_ENABLED`)
 - permissions matrix in code (`videogame:read`, `videogame:write`, `user:manage_roles`) mapped from roles `admin` / `user`
 - videogame CRUD
 - Alembic migrations
 - CLI to seed an admin user (`python -m app.cli create-admin`)
 - GitHub Actions CI (Ruff, Alembic, pytest; Python 3.11–3.13 matrix; concurrency + least-privilege permissions)
 - Dependabot for `pip` and GitHub Actions
+- Production-oriented settings checks (`ENVIRONMENT=production` requires a strong JWT; warns on SQLite)
+- CORS from `CORS_ORIGINS` (explicit origins only — **never `*`** with `allow_credentials=True`) and SlowAPI rate limits on `/api/v1/auth/register`, `/api/v1/auth/login`, `/api/v1/auth/refresh`
+- **Trusted hosts** (`ALLOWED_HOSTS`), **security headers** (optional **HSTS** via `SECURITY_ENABLE_HSTS`), **`X-Request-ID`**, JSON **error envelope** (`error.code`, `message`, `request_id`, `detail`)
+- OpenAPI/Swagger **off by default in production**; set `ENABLE_OPENAPI=true` to expose `/docs`, `/redoc`, `/openapi.json`
+- **DB pool** tuning for non-SQLite URLs (`DB_POOL_SIZE`, `DB_MAX_OVERFLOW`, …)
 
 ## 1) Requirements
 
@@ -46,7 +52,15 @@ Create env file:
 copy .env.example .env
 ```
 
-Set a strong value for `JWT_SECRET_KEY` in `.env`.
+Set a strong value for `JWT_SECRET_KEY` in `.env` (at least **32 characters** if you set `ENVIRONMENT=production`).
+
+Optional in `.env`:
+
+- `CORS_ORIGINS` — comma-separated list (e.g. `http://localhost:3000`). Empty = no CORS middleware.
+- `AUTH_REGISTER_RATE_LIMIT`, `AUTH_LOGIN_RATE_LIMIT`, `AUTH_REFRESH_RATE_LIMIT` — SlowAPI strings such as `10/minute` (defaults are set in [`app/core/config.py`](app/core/config.py)).
+- `ALLOWED_HOSTS`, `API_V1_PREFIX`, `ENABLE_OPENAPI`, `SECURITY_ENABLE_HSTS`, `AUTH_REFRESH_COOKIE_ENABLED`, and pool variables — see [`.env.example`](.env.example).
+
+Middleware runs **TrustedHost → request ID → security headers → CORS** (CORS registered last so it is outermost on the request path, per Starlette ordering).
 
 ## 3) Database migration (Alembic)
 
@@ -77,7 +91,7 @@ Public registration creates users with role `user` only. Create the first admin 
 python -m app.cli create-admin --email admin@example.com --password "your-secure-password"
 ```
 
-If that email already exists (e.g. from a prior `POST /auth/register`), promote and reset password:
+If that email already exists (e.g. from a prior `POST /api/v1/auth/register`), promote and reset password:
 
 ```bash
 python -m app.cli create-admin --email admin@example.com --password "new-password" --force
@@ -91,22 +105,50 @@ Run migrations **before** the CLI so tables exist.
 uvicorn main:app --reload
 ```
 
-Docs:
+Docs (when OpenAPI is enabled for the current environment):
 
 - Swagger UI: <http://127.0.0.1:8000/docs>
 - ReDoc: <http://127.0.0.1:8000/redoc>
+
+Use `create_app()` / `create_app(Settings(...))` from [`app/main.py`](app/main.py) if you need a second app instance (e.g. tests with different settings).
+
+### Docker and Postgres (optional)
+
+Runtime dependencies are **pinned** in [`requirements.txt`](requirements.txt) (frozen 2026-04-03). [`docker-compose.yml`](docker-compose.yml) runs **Postgres 16** and the API; set a real `JWT_SECRET_KEY` in your environment when not only experimenting.
+
+```bash
+docker compose up --build
+```
+
+Apply migrations (one-off):
+
+```bash
+docker compose run --rm api alembic upgrade head
+```
+
+The API uses `DATABASE_URL=postgresql+asyncpg://...` inside Compose. **CI** still uses SQLite and does not require Docker.
 
 ## 6) Auth, permissions, and roles
 
 ### Register
 
-`POST /auth/register`
+`POST /api/v1/auth/register`
 
 - Always creates `user` (never auto-admin).
+- If `AUTH_REQUIRE_EMAIL_VERIFICATION=true`, the user is created with `email_verified=false` until `POST /api/v1/auth/verify-email`; a **console** or **SMTP** email is sent (`EMAIL_BACKEND`, `SMTP_*` in [`.env.example`](.env.example)).
+
+### Email verification
+
+`POST /api/v1/auth/verify-email` with JSON `{ "token": "..." }` (token from the email or console log).
+
+### Forgot / reset password
+
+- `POST /api/v1/auth/forgot-password` — body `{ "email": "..." }`; always responds **204** (no email enumeration).
+- `POST /api/v1/auth/reset-password` — body `{ "token": "...", "new_password": "..." }`.
 
 ### Login
 
-`POST /auth/login`
+`POST /api/v1/auth/login`
 
 Uses OAuth2 form:
 
@@ -116,19 +158,20 @@ Uses OAuth2 form:
 Returns:
 
 - `access_token`
-- `refresh_token`
+- `refresh_token` (omitted when `AUTH_REFRESH_COOKIE_ENABLED=true`; then a **httpOnly** cookie is set and `csrf_token` is returned for `X-CSRF-Token` on cookie-based refresh/logout)
 
 ### Refresh token rotation
 
-`POST /auth/refresh`
+`POST /api/v1/auth/refresh`
 
 - Verifies JWT signature + type + token version
 - Verifies stored hashed refresh token
 - Rotates to a new refresh token (old one becomes invalid)
+- Accepts refresh **cookie first** (with valid CSRF header when using the cookie), else JSON body `refresh_token` (native clients)
 
 ### Logout / revocation
 
-`POST /auth/logout`
+`POST /api/v1/auth/logout`
 
 - Clears stored refresh token hash
 - Increments `token_version`
@@ -136,7 +179,7 @@ Returns:
 
 ### Current user
 
-`GET /auth/me`
+`GET /api/v1/auth/me`
 
 Requires Bearer access token.
 
@@ -144,16 +187,16 @@ Requires Bearer access token.
 
 Defined in `app/core/permissions.py`:
 
-| Role   | Permissions                                      |
-|--------|--------------------------------------------------|
-| admin  | `videogame:read`, `videogame:write`, `user:manage_roles` |
-| user   | `videogame:read`                                 |
+| Role  | Permissions                                              |
+| ----- | -------------------------------------------------------- |
+| admin | `videogame:read`, `videogame:write`, `user:manage_roles` |
+| user  | `videogame:read`                                         |
 
 Routes use `require_permission(...)` in `app/core/dependencies.py`.
 
 ### Change another user’s role
 
-`PATCH /auth/users/{user_id}/role`
+`PATCH /api/v1/auth/users/{user_id}/role`
 
 Body:
 
@@ -169,23 +212,25 @@ Requires `user:manage_roles` (admins have it by default).
 
 All endpoints require Bearer token.
 
-- `GET /videogames` — `videogame:read`
-- `GET /videogames/{videogame_id}` — `videogame:read`
-- `POST /videogames` — `videogame:write`
-- `PATCH /videogames/{videogame_id}` — `videogame:write`
-- `DELETE /videogames/{videogame_id}` — `videogame:write`
+- `GET /api/v1/videogames` — `videogame:read`
+- `GET /api/v1/videogames/{videogame_id}` — `videogame:read`
+- `POST /api/v1/videogames` — `videogame:write`
+- `PATCH /api/v1/videogames/{videogame_id}` — `videogame:write`
+- `DELETE /api/v1/videogames/{videogame_id}` — `videogame:write`
 
 List supports:
 
-- `offset` (default `0`)
+- `offset` (default `0`; ignored when `cursor` is set)
 - `limit` (default `20`, max `100`)
-- optional filters: `genre`, `platform`
+- optional filters: `genre`, `platform`, `q` (substring on title, case-insensitive), `min_price`, `max_price`
+- `sort`: `id_desc` (default), `id_asc`, `price_desc`, `price_asc`, `title_asc`, `title_desc`
+- `cursor`: opaque token from the previous response’s `next_cursor` for stable pagination (must use the same `sort`)
 
 ## 8) CI (GitHub Actions)
 
 Workflow: [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
 
-**Triggers:** push and pull request to `main` or `master`, plus **workflow_dispatch** (manual run from the Actions tab).
+**Triggers:** push and pull request to `main`, `master`, `dev`, and `qa`, plus **workflow_dispatch** (manual run from the Actions tab).
 
 **Hardening:**
 
@@ -195,11 +240,11 @@ Workflow: [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
 **Jobs:**
 
 1. **lint** — Python 3.12, installs only [`requirements-dev.txt`](requirements-dev.txt) (pinned **Ruff**), runs `ruff check` and `ruff format --check` on `app`, `alembic`, `main.py`, `tests`.
-2. **test** — matrix **Python 3.11, 3.12, 3.13**; installs app + dev deps; `alembic upgrade head`; **`pytest`** smoke tests (`tests/`).
+2. **test** — matrix **Python 3.11, 3.12, 3.13**; installs app + dev deps; `alembic upgrade head`; **`pytest`** with **`pytest-cov`** on package **`app`** (minimum **70%** line coverage per [`pyproject.toml`](pyproject.toml)) plus OpenAPI smoke tests (`/openapi.json`, `/docs`).
 
-**Dependabot:** [`.github/dependabot.yml`](.github/dependabot.yml) opens weekly PRs for `pip` and `github-actions`.
+**Dependabot:** [`.github/dependabot.yml`](.github/dependabot.yml) opens weekly PRs for `pip` and `github-actions`, with **`target-branch: dev`** (PRs merge into `dev` first).
 
-Local parity (after `alembic upgrade head` so `/health` can hit the DB):
+Local parity (after `alembic upgrade head` so `/ready` can hit the DB):
 
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt
@@ -209,9 +254,13 @@ ruff format --check app alembic main.py tests
 pytest -q
 ```
 
-Configuration: [`ruff.toml`](ruff.toml). Pytest discovers tests from [`pyproject.toml`](pyproject.toml) (`pythonpath = ["."]`) so imports work even when your IDE runs tests with a non-repo-root working directory.
+To run tests **without** the coverage gate (faster while iterating): `pytest -q --no-cov`.
 
-**Branch protection (recommended):** in GitHub repo settings, require the CI workflow to pass before merging to `main`.
+Configuration: [`ruff.toml`](ruff.toml). Pytest + coverage options live in [`pyproject.toml`](pyproject.toml) (`pythonpath`, `addopts` with `--cov=app` and `--cov-fail-under=70`, `[tool.coverage.*]`). Coverage **omits** `app/cli/*` and empty `app/__init__.py`.
+
+[`tests/conftest.py`](tests/conftest.py) points the app at a **temporary SQLite file** and **`JWT_SECRET_KEY`** for isolation, runs **`create_all`** once per session, and **truncates** `users` / `videogames` after each test. You do **not** need `alembic upgrade` before `pytest` (CI still runs Alembic to validate migrations).
+
+**Branch protection:** configure on GitHub for `main`, `dev`, and `qa` (not in YAML). See [`.github/branch-protection.md`](.github/branch-protection.md) for steps and required check names.
 
 ## 9) Project layout
 
@@ -222,13 +271,21 @@ app/
   core/
     config.py
     dependencies.py
+    email.py
     errors.py
+    limiter.py
+    middleware/
+      request_id.py
+      security_headers.py
     permissions.py
+    request_context.py
     security.py
   db/
+    datetime_utils.py
     session.py
   models/
     user.py
+    user_account_token.py
     videogame.py
   routers/
     auth.py
@@ -243,10 +300,23 @@ alembic/
 .github/
   workflows/
     ci.yml
+  branch-protection.md
   dependabot.yml
 tests/
-  test_smoke.py
+  conftest.py
+  helpers.py
+  integration/
+    test_auth_and_permissions.py
+    test_auth_router.py
+    test_auth_account_flows.py
+    test_auth_cookie_refresh.py
+    test_openapi.py
+    test_openapi_production.py
+    test_smoke.py
+    test_videogames_router.py
 main.py
+docker-compose.yml
+Dockerfile
 pyproject.toml
 requirements-dev.txt
 ruff.toml
@@ -256,3 +326,16 @@ ruff.toml
 
 - Schema changes are managed with Alembic (not `create_all` at runtime).
 - Keep secrets only in `.env` (never commit `.env`).
+
+### Production (`ENVIRONMENT=production` or `prod`)
+
+- App startup **fails** if `JWT_SECRET_KEY` is empty, a known default, or shorter than 32 characters.
+- A **warning** is emitted if `DATABASE_URL` still uses SQLite (use Postgres/MySQL in real deployments).
+- Configure **`CORS_ORIGINS`** for your frontend; rate limits apply per client IP (in-memory store — use Redis-backed limiting if you scale horizontally).
+- **`ALLOWED_HOSTS`** must include the `Host` value your reverse proxy forwards.
+- **`ENABLE_OPENAPI=true`** if you want `/docs` in production (default is off).
+- **`AUTH_REFRESH_COOKIE_ENABLED`** for SPA cookie refresh; keep **`AUTH_COOKIE_SECURE=true`** behind HTTPS.
+
+### Tests
+
+Pytest sets high auth rate limits and `ENVIRONMENT=development` in [`tests/conftest.py`](tests/conftest.py) before importing the app so the suite stays fast and deterministic. Integration-style API tests live under [`tests/integration/`](tests/integration/); shared non-fixture helpers are in [`tests/helpers.py`](tests/helpers.py).

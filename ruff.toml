@@ -7,6 +7,8 @@ ignore = ["E501"]
 
 [lint.per-file-ignores]
 "main.py" = ["F401"]
+# Env must be set before importing app (engine binds at import time).
+"tests/conftest.py" = ["E402"]
 
 [format]
 quote-style = "double"
