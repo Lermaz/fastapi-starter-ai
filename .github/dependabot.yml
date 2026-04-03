@@ -1,13 +1,16 @@
+# Dependabot opens PRs against `dev` (merge to dev first, then promote to qa/main per your flow).
 version: 2
 updates:
   - package-ecosystem: pip
     directory: /
+    target-branch: dev
     schedule:
       interval: weekly
     open-pull-requests-limit: 10
 
   - package-ecosystem: github-actions
     directory: /
+    target-branch: dev
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
