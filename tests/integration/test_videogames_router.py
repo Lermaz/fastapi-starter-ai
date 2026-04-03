@@ -64,6 +64,98 @@ def test_list_videogames_filter_by_platform(client: TestClient, admin_headers: d
     assert filtered.json()["items"][0]["platform"] == "PS5"
 
 
+def test_list_videogames_search_q(client: TestClient, admin_headers: dict) -> None:
+    assert (
+        client.post(
+            f"{_VG}",
+            json=_game_payload(title="Elden Ring", genre="RPG"),
+            headers=admin_headers,
+        ).status_code
+        == 201
+    )
+    assert (
+        client.post(
+            f"{_VG}",
+            json=_game_payload(title="Call of Duty", genre="FPS"),
+            headers=admin_headers,
+        ).status_code
+        == 201
+    )
+    r = client.get(f"{_VG}?q=elden", headers=admin_headers)
+    assert r.status_code == 200
+    data = r.json()
+    assert data["total"] == 1
+    assert "elden" in data["items"][0]["title"].lower()
+
+
+def test_list_videogames_price_range_and_sort(client: TestClient, admin_headers: dict) -> None:
+    for title, price in [("Cheap", "9.99"), ("Mid", "29.99"), ("Premium", "59.99")]:
+        assert (
+            client.post(
+                f"{_VG}",
+                json={**_game_payload(title=title, genre="X"), "price": price},
+                headers=admin_headers,
+            ).status_code
+            == 201
+        )
+    r = client.get(f"{_VG}?min_price=20&max_price=40&sort=price_asc", headers=admin_headers)
+    assert r.status_code == 200
+    data = r.json()
+    assert data["total"] == 1
+    assert data["items"][0]["title"] == "Mid"
+
+
+def test_list_videogames_min_price_gt_max_bad_request(
+    client: TestClient, admin_headers: dict
+) -> None:
+    r = client.get(f"{_VG}?min_price=50&max_price=10", headers=admin_headers)
+    assert r.status_code == 400
+
+
+def test_list_videogames_cursor_pagination(client: TestClient, admin_headers: dict) -> None:
+    for idx in range(5):
+        assert (
+            client.post(
+                f"{_VG}",
+                json=_game_payload(title=f"C-{idx}", genre="Indie"),
+                headers=admin_headers,
+            ).status_code
+            == 201
+        )
+    first = client.get(f"{_VG}?limit=2&sort=id_desc", headers=admin_headers)
+    assert first.status_code == 200
+    b1 = first.json()
+    assert b1["total"] == 5
+    assert len(b1["items"]) == 2
+    assert b1["next_cursor"] is not None
+
+    second = client.get(
+        f"{_VG}?limit=2&sort=id_desc&cursor={b1['next_cursor']}",
+        headers=admin_headers,
+    )
+    assert second.status_code == 200
+    b2 = second.json()
+    assert len(b2["items"]) == 2
+    assert b2["next_cursor"] is not None
+    ids_page1 = {b1["items"][0]["id"], b1["items"][1]["id"]}
+    ids_page2 = {b2["items"][0]["id"], b2["items"][1]["id"]}
+    assert ids_page1.isdisjoint(ids_page2)
+
+    third = client.get(
+        f"{_VG}?limit=2&sort=id_desc&cursor={b2['next_cursor']}",
+        headers=admin_headers,
+    )
+    assert third.status_code == 200
+    b3 = third.json()
+    assert len(b3["items"]) == 1
+    assert b3["next_cursor"] is None
+
+
+def test_list_videogames_invalid_cursor(client: TestClient, admin_headers: dict) -> None:
+    r = client.get(f"{_VG}?cursor=not-valid-base64!!!", headers=admin_headers)
+    assert r.status_code == 400
+
+
 def test_list_videogames_pagination_offset(client: TestClient, admin_headers: dict) -> None:
     for idx in range(3):
         response = client.post(

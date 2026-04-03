@@ -18,6 +18,9 @@ def test_openapi_json_served(client: TestClient) -> None:
     assert "/ready" in paths
     assert f"{API_V1_PREFIX}/auth/register" in paths
     assert f"{API_V1_PREFIX}/auth/login" in paths
+    assert f"{API_V1_PREFIX}/auth/verify-email" in paths
+    assert f"{API_V1_PREFIX}/auth/forgot-password" in paths
+    assert f"{API_V1_PREFIX}/auth/reset-password" in paths
     assert f"{API_V1_PREFIX}/videogames" in paths
     assert "info" in schema
     assert schema["info"].get("title")

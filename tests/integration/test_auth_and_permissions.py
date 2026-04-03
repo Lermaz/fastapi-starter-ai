@@ -12,6 +12,7 @@ def test_register_creates_user_with_role_user(client: TestClient) -> None:
     assert response.status_code == 201
     data = response.json()
     assert data["email"] == "newbie@test.dev"
+    assert data["email_verified"] is True
     assert data["role"] == "user"
     assert data["is_active"] is True
 
