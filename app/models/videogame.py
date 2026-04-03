@@ -1,14 +1,11 @@
-from datetime import UTC, date, datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import Date, DateTime, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.db.datetime_utils import utc_now
 from app.db.session import Base
-
-
-def utc_now() -> datetime:
-    return datetime.now(UTC)
 
 
 class Videogame(Base):

@@ -1,15 +1,12 @@
-from datetime import UTC, datetime
+from datetime import datetime
 from enum import StrEnum
 
 from sqlalchemy import Boolean, DateTime, Integer, String
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.db.datetime_utils import utc_now
 from app.db.session import Base
-
-
-def utc_now() -> datetime:
-    return datetime.now(UTC)
 
 
 class UserRole(StrEnum):
