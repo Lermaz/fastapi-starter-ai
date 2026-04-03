@@ -9,9 +9,9 @@ concurrency:
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, dev, qa]
   pull_request:
-    branches: [main, master]
+    branches: [main, master, dev, qa]
   workflow_dispatch:
 
 jobs:
