@@ -195,7 +195,7 @@ Workflow: [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
 **Jobs:**
 
 1. **lint** — Python 3.12, installs only [`requirements-dev.txt`](requirements-dev.txt) (pinned **Ruff**), runs `ruff check` and `ruff format --check` on `app`, `alembic`, `main.py`, `tests`.
-2. **test** — matrix **Python 3.11, 3.12, 3.13**; installs app + dev deps; `alembic upgrade head`; **`pytest`** smoke tests (`tests/`).
+2. **test** — matrix **Python 3.11, 3.12, 3.13**; installs app + dev deps; `alembic upgrade head`; **`pytest`** (`tests/`: smoke, auth/login, permission denial, admin videogame CRUD, refresh rotation).
 
 **Dependabot:** [`.github/dependabot.yml`](.github/dependabot.yml) opens weekly PRs for `pip` and `github-actions`, with **`target-branch: dev`** (PRs merge into `dev` first).
 
@@ -210,6 +210,8 @@ pytest -q
 ```
 
 Configuration: [`ruff.toml`](ruff.toml). Pytest discovers tests from [`pyproject.toml`](pyproject.toml) (`pythonpath = ["."]`) so imports work even when your IDE runs tests with a non-repo-root working directory.
+
+[`tests/conftest.py`](tests/conftest.py) points the app at a **temporary SQLite file** and **`JWT_SECRET_KEY`** for isolation, runs **`create_all`** once per session, and **truncates** `users` / `videogames` after each test. You do **not** need `alembic upgrade` before `pytest` (CI still runs Alembic to validate migrations).
 
 **Branch protection:** configure on GitHub for `main`, `dev`, and `qa` (not in YAML). See [`.github/branch-protection.md`](.github/branch-protection.md) for steps and required check names.
 
@@ -246,6 +248,8 @@ alembic/
   branch-protection.md
   dependabot.yml
 tests/
+  conftest.py
+  test_auth_and_permissions.py
   test_smoke.py
 main.py
 pyproject.toml
