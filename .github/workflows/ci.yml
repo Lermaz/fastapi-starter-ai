@@ -1,17 +1,23 @@
 name: CI
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches: [main, master]
   pull_request:
     branches: [main, master]
+  workflow_dispatch:
 
 jobs:
-  lint-and-migrations:
+  lint:
+    name: Lint (Ruff)
     runs-on: ubuntu-latest
-    env:
-      DATABASE_URL: sqlite+aiosqlite:///./ci.db
-      JWT_SECRET_KEY: ci-not-for-production
     steps:
       - uses: actions/checkout@v4
 
@@ -20,21 +26,53 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install tooling
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Ruff check
+        run: ruff check app alembic main.py tests
+
+      - name: Ruff format
+        run: ruff format --check app alembic main.py tests
+
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    env:
+      DATABASE_URL: sqlite+aiosqlite:///./ci.db
+      JWT_SECRET_KEY: ci-not-for-production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install ruff
+          pip install -r requirements.txt -r requirements-dev.txt
 
-      - name: Ruff check
-        run: ruff check app alembic main.py
-
-      - name: Ruff format
-        run: ruff format --check app alembic main.py
-
-      - name: Alembic upgrade (sanity)
+      - name: Alembic upgrade
         run: alembic upgrade head
 
       - name: Alembic current
         run: alembic current
+
+      - name: Pytest
+        run: pytest -q
