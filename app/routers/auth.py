@@ -1,9 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.dependencies import get_current_user, require_permission
+from app.core.limiter import limiter
 from app.core.permissions import Permission
 from app.core.security import (
     create_access_token,
@@ -28,7 +30,9 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 @router.post(
     "/register", response_model=AuthenticatedUserResponse, status_code=status.HTTP_201_CREATED
 )
+@limiter.limit(settings.auth_register_rate_limit)
 async def register_user(
+    request: Request,
     payload: UserRegisterRequest,
     db_session: AsyncSession = Depends(get_db_session),
 ) -> AuthenticatedUserResponse:
@@ -49,7 +53,9 @@ async def register_user(
 
 
 @router.post("/login", response_model=TokenResponse, status_code=status.HTTP_200_OK)
+@limiter.limit(settings.auth_login_rate_limit)
 async def login_user(
+    request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
     db_session: AsyncSession = Depends(get_db_session),
 ) -> TokenResponse:
@@ -73,7 +79,9 @@ async def login_user(
 
 
 @router.post("/refresh", response_model=TokenResponse, status_code=status.HTTP_200_OK)
+@limiter.limit(settings.auth_refresh_rate_limit)
 async def refresh_token_pair(
+    request: Request,
     payload: RefreshTokenRequest,
     db_session: AsyncSession = Depends(get_db_session),
 ) -> TokenResponse:

@@ -18,6 +18,11 @@ _test_db_path = Path(tempfile.gettempdir()) / f"fastapi-cursor-pytest-{uuid.uuid
 _test_db_path.unlink(missing_ok=True)
 os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{_test_db_path.as_posix()}"
 os.environ["JWT_SECRET_KEY"] = "pytest-jwt-secret-key-not-for-production"
+os.environ["ENVIRONMENT"] = "development"
+# Avoid SlowAPI tripping fast integration tests.
+os.environ["AUTH_REGISTER_RATE_LIMIT"] = "10000/minute"
+os.environ["AUTH_LOGIN_RATE_LIMIT"] = "10000/minute"
+os.environ["AUTH_REFRESH_RATE_LIMIT"] = "10000/minute"
 
 from app.core.security import hash_password
 from app.db.session import Base, async_session, engine

@@ -10,6 +10,8 @@ Production-style FastAPI baseline with:
 - CLI to seed an admin user (`python -m app.cli create-admin`)
 - GitHub Actions CI (Ruff, Alembic, pytest; Python 3.11–3.13 matrix; concurrency + least-privilege permissions)
 - Dependabot for `pip` and GitHub Actions
+- Production-oriented settings checks (`ENVIRONMENT=production` requires a strong JWT; warns on SQLite)
+- CORS from `CORS_ORIGINS` and SlowAPI rate limits on `/auth/register`, `/auth/login`, `/auth/refresh`
 
 ## 1) Requirements
 
@@ -46,7 +48,12 @@ Create env file:
 copy .env.example .env
 ```
 
-Set a strong value for `JWT_SECRET_KEY` in `.env`.
+Set a strong value for `JWT_SECRET_KEY` in `.env` (at least **32 characters** if you set `ENVIRONMENT=production`).
+
+Optional in `.env`:
+
+- `CORS_ORIGINS` — comma-separated list (e.g. `http://localhost:3000`). Empty = no CORS middleware.
+- `AUTH_REGISTER_RATE_LIMIT`, `AUTH_LOGIN_RATE_LIMIT`, `AUTH_REFRESH_RATE_LIMIT` — SlowAPI strings such as `10/minute` (defaults are set in [`app/core/config.py`](app/core/config.py)).
 
 ## 3) Database migration (Alembic)
 
@@ -225,6 +232,7 @@ app/
     config.py
     dependencies.py
     errors.py
+    limiter.py
     permissions.py
     security.py
   db/
@@ -261,3 +269,13 @@ ruff.toml
 
 - Schema changes are managed with Alembic (not `create_all` at runtime).
 - Keep secrets only in `.env` (never commit `.env`).
+
+### Production (`ENVIRONMENT=production` or `prod`)
+
+- App startup **fails** if `JWT_SECRET_KEY` is empty, a known default, or shorter than 32 characters.
+- A **warning** is emitted if `DATABASE_URL` still uses SQLite (use Postgres/MySQL in real deployments).
+- Configure **`CORS_ORIGINS`** for your frontend; rate limits apply per client IP (in-memory store — use Redis-backed limiting if you scale horizontally).
+
+### Tests
+
+Pytest sets high auth rate limits and `ENVIRONMENT=development` in [`tests/conftest.py`](tests/conftest.py) before importing the app so the suite stays fast and deterministic.
