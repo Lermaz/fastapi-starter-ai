@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from app.core.security import hash_password
 from app.db.session import async_session
 from app.models.user import User, UserRole
-from tests.conftest import bearer_headers, login_form, register_user
+from tests.helpers import bearer_headers, login_form, register_user
 
 
 def _seed_inactive_user() -> None:

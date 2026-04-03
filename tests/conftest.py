@@ -29,6 +29,7 @@ from app.db.session import Base, async_session, engine
 from app.main import app
 from app.models.user import User, UserRole
 from app.models.videogame import Videogame
+from tests.helpers import bearer_headers, login_form, register_user
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -60,21 +61,6 @@ def _truncate_tables() -> Generator[None, None, None]:
 def client() -> Generator[TestClient, None, None]:
     with TestClient(app) as test_client:
         yield test_client
-
-
-def register_user(client: TestClient, *, email: str, password: str):
-    return client.post("/auth/register", json={"email": email, "password": password})
-
-
-def login_form(client: TestClient, *, email: str, password: str):
-    return client.post(
-        "/auth/login",
-        data={"username": email, "password": password},
-    )
-
-
-def bearer_headers(access_token: str) -> dict[str, str]:
-    return {"Authorization": f"Bearer {access_token}"}
 
 
 @pytest.fixture

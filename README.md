@@ -259,11 +259,13 @@ alembic/
   dependabot.yml
 tests/
   conftest.py
-  test_auth_and_permissions.py
-  test_auth_router.py
-  test_openapi.py
-  test_smoke.py
-  test_videogames_router.py
+  helpers.py
+  integration/
+    test_auth_and_permissions.py
+    test_auth_router.py
+    test_openapi.py
+    test_smoke.py
+    test_videogames_router.py
 main.py
 pyproject.toml
 requirements-dev.txt
@@ -283,4 +285,4 @@ ruff.toml
 
 ### Tests
 
-Pytest sets high auth rate limits and `ENVIRONMENT=development` in [`tests/conftest.py`](tests/conftest.py) before importing the app so the suite stays fast and deterministic.
+Pytest sets high auth rate limits and `ENVIRONMENT=development` in [`tests/conftest.py`](tests/conftest.py) before importing the app so the suite stays fast and deterministic. Integration-style API tests live under [`tests/integration/`](tests/integration/); shared non-fixture helpers are in [`tests/helpers.py`](tests/helpers.py).
