@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  lint-and-migrations:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: sqlite+aiosqlite:///./ci.db
+      JWT_SECRET_KEY: ci-not-for-production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install ruff
+
+      - name: Ruff check
+        run: ruff check app alembic main.py
+
+      - name: Ruff format
+        run: ruff format --check app alembic main.py
+
+      - name: Alembic upgrade (sanity)
+        run: alembic upgrade head
+
+      - name: Alembic current
+        run: alembic current
