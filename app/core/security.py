@@ -54,3 +54,21 @@ def decode_token(token: str) -> dict[str, Any]:
         return jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
     except JWTError as exc:
         raise ValueError("Invalid or expired token") from exc
+
+
+def create_csrf_token() -> str:
+    return create_token(
+        subject="csrf",
+        expires_delta=timedelta(minutes=settings.refresh_token_expire_minutes),
+        token_type="csrf",
+    )
+
+
+def csrf_token_is_valid(token: str | None) -> bool:
+    if token is None or not str(token).strip():
+        return False
+    try:
+        payload = decode_token(str(token).strip())
+    except ValueError:
+        return False
+    return payload.get("type") == "csrf" and payload.get("sub") == "csrf"

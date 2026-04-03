@@ -4,7 +4,7 @@ import time
 
 from fastapi.testclient import TestClient
 
-from tests.helpers import login_form, register_user
+from tests.helpers import API_V1_PREFIX, login_form, register_user
 
 
 def test_register_creates_user_with_role_user(client: TestClient) -> None:
@@ -39,13 +39,13 @@ def test_login_invalid_password_unauthorized(client: TestClient) -> None:
 
 
 def test_me_without_token_unauthorized(client: TestClient) -> None:
-    response = client.get("/auth/me")
+    response = client.get(f"{API_V1_PREFIX}/auth/me")
     assert response.status_code == 401
 
 
 def test_me_with_token_ok(client: TestClient, regular_user: tuple) -> None:
     _, _, headers = regular_user
-    response = client.get("/auth/me", headers=headers)
+    response = client.get(f"{API_V1_PREFIX}/auth/me", headers=headers)
     assert response.status_code == 200
     assert response.json()["email"] == "regular@test.dev"
 
@@ -59,14 +59,14 @@ def test_regular_user_cannot_create_videogame(client: TestClient, regular_user: 
         "price": "59.99",
         "stock": 5,
     }
-    response = client.post("/videogames", json=payload, headers=headers)
+    response = client.post(f"{API_V1_PREFIX}/videogames", json=payload, headers=headers)
     assert response.status_code == 403
 
 
 def test_regular_user_cannot_change_roles(client: TestClient, regular_user: tuple) -> None:
     _, _, headers = regular_user
     response = client.patch(
-        "/auth/users/1/role",
+        f"{API_V1_PREFIX}/auth/users/1/role",
         json={"role": "admin"},
         headers=headers,
     )
@@ -75,7 +75,7 @@ def test_regular_user_cannot_change_roles(client: TestClient, regular_user: tupl
 
 def test_regular_user_can_list_videogames_empty(client: TestClient, regular_user: tuple) -> None:
     _, _, headers = regular_user
-    response = client.get("/videogames", headers=headers)
+    response = client.get(f"{API_V1_PREFIX}/videogames", headers=headers)
     assert response.status_code == 200
     data = response.json()
     assert data["total"] == 0
@@ -90,32 +90,34 @@ def test_admin_videogame_crud_flow(client: TestClient, admin_headers: dict) -> N
         "price": "19.99",
         "stock": 10,
     }
-    create_response = client.post("/videogames", json=create_payload, headers=admin_headers)
+    create_response = client.post(
+        f"{API_V1_PREFIX}/videogames", json=create_payload, headers=admin_headers
+    )
     assert create_response.status_code == 201, create_response.text
     created = create_response.json()
     game_id = created["id"]
     assert created["title"] == "Hollow Knight"
 
-    list_response = client.get("/videogames", headers=admin_headers)
+    list_response = client.get(f"{API_V1_PREFIX}/videogames", headers=admin_headers)
     assert list_response.status_code == 200
     assert list_response.json()["total"] == 1
 
-    get_response = client.get(f"/videogames/{game_id}", headers=admin_headers)
+    get_response = client.get(f"{API_V1_PREFIX}/videogames/{game_id}", headers=admin_headers)
     assert get_response.status_code == 200
     assert get_response.json()["stock"] == 10
 
     patch_response = client.patch(
-        f"/videogames/{game_id}",
+        f"{API_V1_PREFIX}/videogames/{game_id}",
         json={"stock": 3},
         headers=admin_headers,
     )
     assert patch_response.status_code == 200
     assert patch_response.json()["stock"] == 3
 
-    delete_response = client.delete(f"/videogames/{game_id}", headers=admin_headers)
+    delete_response = client.delete(f"{API_V1_PREFIX}/videogames/{game_id}", headers=admin_headers)
     assert delete_response.status_code == 204
 
-    missing = client.get(f"/videogames/{game_id}", headers=admin_headers)
+    missing = client.get(f"{API_V1_PREFIX}/videogames/{game_id}", headers=admin_headers)
     assert missing.status_code == 404
 
 
@@ -129,7 +131,7 @@ def test_refresh_token_returns_new_pair(client: TestClient) -> None:
     time.sleep(1.1)
 
     refresh_response = client.post(
-        "/auth/refresh",
+        f"{API_V1_PREFIX}/auth/refresh",
         json={"refresh_token": old_refresh},
     )
     assert refresh_response.status_code == 200
@@ -137,5 +139,5 @@ def test_refresh_token_returns_new_pair(client: TestClient) -> None:
     assert new_pair["refresh_token"] != old_refresh
     assert len(new_pair["access_token"]) > 20
 
-    stale = client.post("/auth/refresh", json={"refresh_token": old_refresh})
+    stale = client.post(f"{API_V1_PREFIX}/auth/refresh", json={"refresh_token": old_refresh})
     assert stale.status_code == 401

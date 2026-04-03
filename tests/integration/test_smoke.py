@@ -12,4 +12,12 @@ def test_health_ok(client: TestClient) -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "ok"
+    assert "database" not in body
+
+
+def test_ready_ok(client: TestClient) -> None:
+    response = client.get("/ready")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
     assert body["database"] == "up"
