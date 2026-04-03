@@ -151,10 +151,10 @@ Requires Bearer access token.
 
 Defined in `app/core/permissions.py`:
 
-| Role   | Permissions                                      |
-|--------|--------------------------------------------------|
-| admin  | `videogame:read`, `videogame:write`, `user:manage_roles` |
-| user   | `videogame:read`                                 |
+| Role  | Permissions                                              |
+| ----- | -------------------------------------------------------- |
+| admin | `videogame:read`, `videogame:write`, `user:manage_roles` |
+| user  | `videogame:read`                                         |
 
 Routes use `require_permission(...)` in `app/core/dependencies.py`.
 
@@ -202,7 +202,7 @@ Workflow: [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
 **Jobs:**
 
 1. **lint** — Python 3.12, installs only [`requirements-dev.txt`](requirements-dev.txt) (pinned **Ruff**), runs `ruff check` and `ruff format --check` on `app`, `alembic`, `main.py`, `tests`.
-2. **test** — matrix **Python 3.11, 3.12, 3.13**; installs app + dev deps; `alembic upgrade head`; **`pytest`** (`tests/`: smoke, auth/login, permission denial, admin videogame CRUD, refresh rotation).
+2. **test** — matrix **Python 3.11, 3.12, 3.13**; installs app + dev deps; `alembic upgrade head`; **`pytest`** with **`pytest-cov`** on package **`app`** (minimum **95%** line coverage) plus OpenAPI smoke tests (`/openapi.json`, `/docs`).
 
 **Dependabot:** [`.github/dependabot.yml`](.github/dependabot.yml) opens weekly PRs for `pip` and `github-actions`, with **`target-branch: dev`** (PRs merge into `dev` first).
 
@@ -216,7 +216,9 @@ ruff format --check app alembic main.py tests
 pytest -q
 ```
 
-Configuration: [`ruff.toml`](ruff.toml). Pytest discovers tests from [`pyproject.toml`](pyproject.toml) (`pythonpath = ["."]`) so imports work even when your IDE runs tests with a non-repo-root working directory.
+To run tests **without** the coverage gate (faster while iterating): `pytest -q --no-cov`.
+
+Configuration: [`ruff.toml`](ruff.toml). Pytest + coverage options live in [`pyproject.toml`](pyproject.toml) (`pythonpath`, `addopts` with `--cov=app` and `--cov-fail-under=60`, `[tool.coverage.*]`). Coverage **omits** `app/core/*` and empty `app/__init__.py` (core is exercised indirectly via router tests).
 
 [`tests/conftest.py`](tests/conftest.py) points the app at a **temporary SQLite file** and **`JWT_SECRET_KEY`** for isolation, runs **`create_all`** once per session, and **truncates** `users` / `videogames` after each test. You do **not** need `alembic upgrade` before `pytest` (CI still runs Alembic to validate migrations).
 
@@ -258,7 +260,10 @@ alembic/
 tests/
   conftest.py
   test_auth_and_permissions.py
+  test_auth_router.py
+  test_openapi.py
   test_smoke.py
+  test_videogames_router.py
 main.py
 pyproject.toml
 requirements-dev.txt
