@@ -11,7 +11,7 @@ class Base(DeclarativeBase):
 
 
 def _engine_kwargs(s: Settings) -> dict:
-    kwargs: dict = {"echo": s.db_echo, "future": True}
+    kwargs: dict = {"echo": s.db_echo}
     if "sqlite" in s.database_url.lower():
         return kwargs
     kwargs["pool_size"] = s.db_pool_size
