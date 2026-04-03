@@ -10,6 +10,8 @@ Production-style FastAPI baseline with:
 - CLI to seed an admin user (`python -m app.cli create-admin`)
 - GitHub Actions CI (Ruff, Alembic, pytest; Python 3.11–3.13 matrix; concurrency + least-privilege permissions)
 - Dependabot for `pip` and GitHub Actions
+- Production-oriented settings checks (`ENVIRONMENT=production` requires a strong JWT; warns on SQLite)
+- CORS from `CORS_ORIGINS` and SlowAPI rate limits on `/auth/register`, `/auth/login`, `/auth/refresh`
 
 ## 1) Requirements
 
@@ -46,7 +48,12 @@ Create env file:
 copy .env.example .env
 ```
 
-Set a strong value for `JWT_SECRET_KEY` in `.env`.
+Set a strong value for `JWT_SECRET_KEY` in `.env` (at least **32 characters** if you set `ENVIRONMENT=production`).
+
+Optional in `.env`:
+
+- `CORS_ORIGINS` — comma-separated list (e.g. `http://localhost:3000`). Empty = no CORS middleware.
+- `AUTH_REGISTER_RATE_LIMIT`, `AUTH_LOGIN_RATE_LIMIT`, `AUTH_REFRESH_RATE_LIMIT` — SlowAPI strings such as `10/minute` (defaults are set in [`app/core/config.py`](app/core/config.py)).
 
 ## 3) Database migration (Alembic)
 
@@ -144,10 +151,10 @@ Requires Bearer access token.
 
 Defined in `app/core/permissions.py`:
 
-| Role   | Permissions                                      |
-|--------|--------------------------------------------------|
-| admin  | `videogame:read`, `videogame:write`, `user:manage_roles` |
-| user   | `videogame:read`                                 |
+| Role  | Permissions                                              |
+| ----- | -------------------------------------------------------- |
+| admin | `videogame:read`, `videogame:write`, `user:manage_roles` |
+| user  | `videogame:read`                                         |
 
 Routes use `require_permission(...)` in `app/core/dependencies.py`.
 
@@ -195,7 +202,7 @@ Workflow: [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
 **Jobs:**
 
 1. **lint** — Python 3.12, installs only [`requirements-dev.txt`](requirements-dev.txt) (pinned **Ruff**), runs `ruff check` and `ruff format --check` on `app`, `alembic`, `main.py`, `tests`.
-2. **test** — matrix **Python 3.11, 3.12, 3.13**; installs app + dev deps; `alembic upgrade head`; **`pytest`** (`tests/`: smoke, auth/login, permission denial, admin videogame CRUD, refresh rotation).
+2. **test** — matrix **Python 3.11, 3.12, 3.13**; installs app + dev deps; `alembic upgrade head`; **`pytest`** with **`pytest-cov`** on package **`app`** (minimum **95%** line coverage) plus OpenAPI smoke tests (`/openapi.json`, `/docs`).
 
 **Dependabot:** [`.github/dependabot.yml`](.github/dependabot.yml) opens weekly PRs for `pip` and `github-actions`, with **`target-branch: dev`** (PRs merge into `dev` first).
 
@@ -209,7 +216,9 @@ ruff format --check app alembic main.py tests
 pytest -q
 ```
 
-Configuration: [`ruff.toml`](ruff.toml). Pytest discovers tests from [`pyproject.toml`](pyproject.toml) (`pythonpath = ["."]`) so imports work even when your IDE runs tests with a non-repo-root working directory.
+To run tests **without** the coverage gate (faster while iterating): `pytest -q --no-cov`.
+
+Configuration: [`ruff.toml`](ruff.toml). Pytest + coverage options live in [`pyproject.toml`](pyproject.toml) (`pythonpath`, `addopts` with `--cov=app` and `--cov-fail-under=60`, `[tool.coverage.*]`). Coverage **omits** `app/core/*` and empty `app/__init__.py` (core is exercised indirectly via router tests).
 
 [`tests/conftest.py`](tests/conftest.py) points the app at a **temporary SQLite file** and **`JWT_SECRET_KEY`** for isolation, runs **`create_all`** once per session, and **truncates** `users` / `videogames` after each test. You do **not** need `alembic upgrade` before `pytest` (CI still runs Alembic to validate migrations).
 
@@ -225,6 +234,7 @@ app/
     config.py
     dependencies.py
     errors.py
+    limiter.py
     permissions.py
     security.py
   db/
@@ -249,8 +259,13 @@ alembic/
   dependabot.yml
 tests/
   conftest.py
-  test_auth_and_permissions.py
-  test_smoke.py
+  helpers.py
+  integration/
+    test_auth_and_permissions.py
+    test_auth_router.py
+    test_openapi.py
+    test_smoke.py
+    test_videogames_router.py
 main.py
 pyproject.toml
 requirements-dev.txt
@@ -261,3 +276,13 @@ ruff.toml
 
 - Schema changes are managed with Alembic (not `create_all` at runtime).
 - Keep secrets only in `.env` (never commit `.env`).
+
+### Production (`ENVIRONMENT=production` or `prod`)
+
+- App startup **fails** if `JWT_SECRET_KEY` is empty, a known default, or shorter than 32 characters.
+- A **warning** is emitted if `DATABASE_URL` still uses SQLite (use Postgres/MySQL in real deployments).
+- Configure **`CORS_ORIGINS`** for your frontend; rate limits apply per client IP (in-memory store — use Redis-backed limiting if you scale horizontally).
+
+### Tests
+
+Pytest sets high auth rate limits and `ENVIRONMENT=development` in [`tests/conftest.py`](tests/conftest.py) before importing the app so the suite stays fast and deterministic. Integration-style API tests live under [`tests/integration/`](tests/integration/); shared non-fixture helpers are in [`tests/helpers.py`](tests/helpers.py).

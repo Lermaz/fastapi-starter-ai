@@ -4,7 +4,7 @@ import time
 
 from fastapi.testclient import TestClient
 
-from tests.conftest import login_form, register_user
+from tests.helpers import login_form, register_user
 
 
 def test_register_creates_user_with_role_user(client: TestClient) -> None:
