@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from app.core.security import hash_password
 from app.db.session import async_session
 from app.models.user import User, UserRole
-from tests.helpers import bearer_headers, login_form, register_user
+from tests.helpers import API_V1_PREFIX, bearer_headers, error_detail, login_form, register_user
 
 
 def _seed_inactive_user() -> None:
@@ -31,7 +31,7 @@ def test_login_inactive_user_forbidden(client: TestClient) -> None:
     _seed_inactive_user()
     response = login_form(client, email="inactive@test.dev", password="password1")
     assert response.status_code == 403
-    assert "inactive" in response.json()["detail"].lower()
+    assert "inactive" in str(error_detail(response.json())).lower()
 
 
 def test_logout_revokes_access_token(client: TestClient) -> None:
@@ -40,16 +40,16 @@ def test_logout_revokes_access_token(client: TestClient) -> None:
     assert login_response.status_code == 200
     headers = bearer_headers(login_response.json()["access_token"])
 
-    logout_response = client.post("/auth/logout", headers=headers)
+    logout_response = client.post(f"{API_V1_PREFIX}/auth/logout", headers=headers)
     assert logout_response.status_code == 204
 
-    me_response = client.get("/auth/me", headers=headers)
+    me_response = client.get(f"{API_V1_PREFIX}/auth/me", headers=headers)
     assert me_response.status_code == 401
 
 
 def test_refresh_invalid_jwt_unauthorized(client: TestClient) -> None:
     # RefreshTokenRequest enforces min_length=20; still not a valid JWT.
-    response = client.post("/auth/refresh", json={"refresh_token": "x" * 24})
+    response = client.post(f"{API_V1_PREFIX}/auth/refresh", json={"refresh_token": "x" * 24})
     assert response.status_code == 401
 
 
@@ -57,9 +57,9 @@ def test_refresh_with_access_token_wrong_type(client: TestClient) -> None:
     register_user(client, email="wrongtype@test.dev", password="password1")
     login_response = login_form(client, email="wrongtype@test.dev", password="password1")
     access_token = login_response.json()["access_token"]
-    response = client.post("/auth/refresh", json={"refresh_token": access_token})
+    response = client.post(f"{API_V1_PREFIX}/auth/refresh", json={"refresh_token": access_token})
     assert response.status_code == 401
-    assert response.json()["detail"] == "Invalid refresh token type"
+    assert error_detail(response.json()) == "Invalid refresh token type"
 
 
 def test_admin_patch_user_role_ok(client: TestClient, admin_headers: dict) -> None:
@@ -68,7 +68,7 @@ def test_admin_patch_user_role_ok(client: TestClient, admin_headers: dict) -> No
     user_id = register_response.json()["id"]
 
     patch_response = client.patch(
-        f"/auth/users/{user_id}/role",
+        f"{API_V1_PREFIX}/auth/users/{user_id}/role",
         json={"role": "admin"},
         headers=admin_headers,
     )
@@ -80,7 +80,7 @@ def test_admin_patch_user_role_ok(client: TestClient, admin_headers: dict) -> No
 
 def test_admin_patch_user_role_not_found(client: TestClient, admin_headers: dict) -> None:
     response = client.patch(
-        "/auth/users/999999/role",
+        f"{API_V1_PREFIX}/auth/users/999999/role",
         json={"role": "admin"},
         headers=admin_headers,
     )

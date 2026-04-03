@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from tests.helpers import API_V1_PREFIX
+
 
 def test_openapi_json_served(client: TestClient) -> None:
     response = client.get("/openapi.json")
@@ -13,9 +15,10 @@ def test_openapi_json_served(client: TestClient) -> None:
     assert "paths" in schema and isinstance(schema["paths"], dict)
     paths = schema["paths"]
     assert "/health" in paths
-    assert "/auth/register" in paths
-    assert "/auth/login" in paths
-    assert "/videogames" in paths
+    assert "/ready" in paths
+    assert f"{API_V1_PREFIX}/auth/register" in paths
+    assert f"{API_V1_PREFIX}/auth/login" in paths
+    assert f"{API_V1_PREFIX}/videogames" in paths
     assert "info" in schema
     assert schema["info"].get("title")
 
