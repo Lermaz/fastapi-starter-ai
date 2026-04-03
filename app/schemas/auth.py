@@ -1,6 +1,6 @@
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
-from app.models.user import UserRole
+from app.models.user import User, UserRole
 
 
 class UserRegisterRequest(BaseModel):
@@ -27,12 +27,34 @@ class TokenResponse(BaseModel):
 
 
 class AuthenticatedUserResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
     id: int
     email: EmailStr
     is_active: bool
     role: UserRole
+    email_verified: bool
+
+
+def authenticated_user_from_orm(user: User) -> AuthenticatedUserResponse:
+    return AuthenticatedUserResponse(
+        id=user.id,
+        email=user.email,
+        is_active=user.is_active,
+        role=user.role,
+        email_verified=user.email_verified_at is not None,
+    )
+
+
+class VerifyEmailRequest(BaseModel):
+    token: str = Field(min_length=10, max_length=512)
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(min_length=10, max_length=512)
+    new_password: str = Field(min_length=8, max_length=128)
 
 
 class UserRoleUpdateRequest(BaseModel):

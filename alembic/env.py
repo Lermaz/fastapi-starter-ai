@@ -7,7 +7,7 @@ from sqlalchemy import engine_from_config, pool
 from alembic import context
 from app.core.config import settings
 from app.db.session import Base
-from app.models import User, Videogame
+from app.models import User, UserAccountToken, Videogame
 
 # this is the Alembic Config object
 config = context.config
@@ -16,13 +16,17 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 # Import side effects for metadata registration.
-_ = (User, Videogame)
+_ = (User, UserAccountToken, Videogame)
 target_metadata = Base.metadata
 
 
 def get_database_url() -> str:
-    database_url = settings.database_url
-    return database_url.replace("+aiosqlite", "")
+    url = settings.database_url
+    if "+aiosqlite" in url:
+        return url.replace("+aiosqlite", "")
+    if "+asyncpg" in url:
+        return url.replace("+asyncpg", "+psycopg2")
+    return url
 
 
 def run_migrations_offline() -> None:

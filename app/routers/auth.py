@@ -5,9 +5,11 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.account_tokens import consume_account_token, mint_account_token
 from app.core.config import Settings
 from app.core.config import settings as default_settings
 from app.core.dependencies import get_current_user, require_permission
+from app.core.email import send_email
 from app.core.limiter import limiter
 from app.core.permissions import Permission
 from app.core.security import (
@@ -19,14 +21,20 @@ from app.core.security import (
     hash_password,
     verify_password,
 )
+from app.db.datetime_utils import utc_now
 from app.db.session import get_db_session
 from app.models.user import User, UserRole
+from app.models.user_account_token import AccountTokenPurpose
 from app.schemas.auth import (
     AuthenticatedUserResponse,
+    ForgotPasswordRequest,
     RefreshTokenRequest,
+    ResetPasswordRequest,
     TokenResponse,
     UserRegisterRequest,
     UserRoleUpdateRequest,
+    VerifyEmailRequest,
+    authenticated_user_from_orm,
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -96,16 +104,35 @@ async def register_user(
     if existing_user is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
 
+    s = _app_settings(request)
+    verified_at = None if s.auth_require_email_verification else utc_now()
     user = User(
         email=payload.email.lower(),
         hashed_password=hash_password(payload.password),
         is_active=True,
         role=UserRole.user,
+        email_verified_at=verified_at,
     )
     db_session.add(user)
     await db_session.commit()
     await db_session.refresh(user)
-    return AuthenticatedUserResponse.model_validate(user)
+
+    if s.auth_require_email_verification:
+        raw = await mint_account_token(
+            db_session,
+            user_id=user.id,
+            purpose=AccountTokenPurpose.email_verify,
+            expire_minutes=s.email_verification_token_expire_minutes,
+        )
+        await send_email(
+            settings=s,
+            to_addr=user.email,
+            subject="Verify your email",
+            body_text=f"Use this token with POST /api/v1/auth/verify-email:\n\n{raw}\n",
+        )
+        await db_session.commit()
+
+    return authenticated_user_from_orm(user)
 
 
 @router.post("/login", response_model=TokenResponse, status_code=status.HTTP_200_OK)
@@ -126,6 +153,12 @@ async def login_user(
 
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User is inactive")
+
+    if s.auth_require_email_verification and user.email_verified_at is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Email not verified",
+        )
 
     subject = str(user.id)
     access_token = create_access_token(subject=subject, token_version=user.token_version)
@@ -184,6 +217,11 @@ async def refresh_token_pair(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token"
         )
+    if s.auth_require_email_verification and user.email_verified_at is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Email not verified",
+        )
     if user.token_version != token_version:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token has been revoked"
@@ -215,11 +253,97 @@ async def refresh_token_pair(
     )
 
 
+@router.post(
+    "/verify-email",
+    response_model=AuthenticatedUserResponse,
+    status_code=status.HTTP_200_OK,
+)
+@limiter.limit(default_settings.auth_verify_email_rate_limit)
+async def verify_email(
+    request: Request,
+    payload: Annotated[VerifyEmailRequest, Body()],
+    db_session: AsyncSession = Depends(get_db_session),
+) -> AuthenticatedUserResponse:
+    user = await consume_account_token(
+        db_session,
+        raw_token=payload.token,
+        purpose=AccountTokenPurpose.email_verify,
+    )
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired verification token",
+        )
+    user.email_verified_at = utc_now()
+    await db_session.commit()
+    await db_session.refresh(user)
+    return authenticated_user_from_orm(user)
+
+
+@router.post(
+    "/forgot-password",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+)
+@limiter.limit(default_settings.auth_forgot_password_rate_limit)
+async def forgot_password(
+    request: Request,
+    payload: Annotated[ForgotPasswordRequest, Body()],
+    db_session: AsyncSession = Depends(get_db_session),
+) -> Response:
+    s = _app_settings(request)
+    normalized = payload.email.lower()
+    user = await db_session.scalar(select(User).where(User.email == normalized))
+    if user is not None and user.is_active:
+        raw = await mint_account_token(
+            db_session,
+            user_id=user.id,
+            purpose=AccountTokenPurpose.password_reset,
+            expire_minutes=s.password_reset_token_expire_minutes,
+        )
+        await send_email(
+            settings=s,
+            to_addr=user.email,
+            subject="Password reset",
+            body_text=f"Use this token with POST /api/v1/auth/reset-password:\n\n{raw}\n",
+        )
+        await db_session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/reset-password",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+)
+@limiter.limit(default_settings.auth_reset_password_rate_limit)
+async def reset_password(
+    request: Request,
+    payload: Annotated[ResetPasswordRequest, Body()],
+    db_session: AsyncSession = Depends(get_db_session),
+) -> Response:
+    user = await consume_account_token(
+        db_session,
+        raw_token=payload.token,
+        purpose=AccountTokenPurpose.password_reset,
+    )
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset token",
+        )
+    user.hashed_password = hash_password(payload.new_password)
+    user.token_version += 1
+    user.refresh_token_hash = None
+    await db_session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.get("/me", response_model=AuthenticatedUserResponse, status_code=status.HTTP_200_OK)
 async def get_authenticated_user(
     user: User = Depends(get_current_user),
 ) -> AuthenticatedUserResponse:
-    return AuthenticatedUserResponse.model_validate(user)
+    return authenticated_user_from_orm(user)
 
 
 @router.post(
@@ -261,4 +385,4 @@ async def update_user_role(
     user.role = payload.role
     await db_session.commit()
     await db_session.refresh(user)
-    return AuthenticatedUserResponse.model_validate(user)
+    return authenticated_user_from_orm(user)

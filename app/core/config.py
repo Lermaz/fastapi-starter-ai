@@ -57,6 +57,22 @@ class Settings(BaseSettings):
     auth_cookie_samesite: Literal["lax", "strict", "none"] = "lax"
     auth_refresh_cookie_name: str = "refresh_token"
 
+    auth_require_email_verification: bool = False
+    email_verification_token_expire_minutes: int = 60 * 24 * 3
+    password_reset_token_expire_minutes: int = 60
+
+    email_backend: Literal["console", "smtp"] = "console"
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = "noreply@localhost"
+    smtp_use_tls: bool = True
+
+    auth_verify_email_rate_limit: str = "30/minute"
+    auth_forgot_password_rate_limit: str = "10/minute"
+    auth_reset_password_rate_limit: str = "20/minute"
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

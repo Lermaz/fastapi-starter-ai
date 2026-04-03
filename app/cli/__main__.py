@@ -7,6 +7,7 @@ import sys
 from sqlalchemy import select
 
 from app.core.security import hash_password
+from app.db.datetime_utils import utc_now
 from app.db.session import async_session
 from app.models.user import User, UserRole
 
@@ -24,6 +25,7 @@ async def cmd_create_admin(*, email: str, password: str, force: bool) -> int:
                 return 1
             user.role = UserRole.admin
             user.hashed_password = hash_password(password)
+            user.email_verified_at = utc_now()
             await session.commit()
             print(f"Promoted existing user to admin: {email_norm}")
             return 0
@@ -33,6 +35,7 @@ async def cmd_create_admin(*, email: str, password: str, force: bool) -> int:
             hashed_password=hash_password(password),
             is_active=True,
             role=UserRole.admin,
+            email_verified_at=utc_now(),
         )
         session.add(new_user)
         await session.commit()

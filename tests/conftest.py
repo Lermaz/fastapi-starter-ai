@@ -23,11 +23,16 @@ os.environ["ENVIRONMENT"] = "development"
 os.environ["AUTH_REGISTER_RATE_LIMIT"] = "10000/minute"
 os.environ["AUTH_LOGIN_RATE_LIMIT"] = "10000/minute"
 os.environ["AUTH_REFRESH_RATE_LIMIT"] = "10000/minute"
+os.environ["AUTH_VERIFY_EMAIL_RATE_LIMIT"] = "10000/minute"
+os.environ["AUTH_FORGOT_PASSWORD_RATE_LIMIT"] = "10000/minute"
+os.environ["AUTH_RESET_PASSWORD_RATE_LIMIT"] = "10000/minute"
 
 from app.core.security import hash_password
+from app.db.datetime_utils import utc_now
 from app.db.session import Base, async_session, engine
 from app.main import app
 from app.models.user import User, UserRole
+from app.models.user_account_token import UserAccountToken
 from app.models.videogame import Videogame
 from tests.helpers import bearer_headers, login_form, register_user
 
@@ -50,6 +55,7 @@ def _truncate_tables() -> Generator[None, None, None]:
 
     async def truncate() -> None:
         async with async_session() as session:
+            await session.execute(delete(UserAccountToken))
             await session.execute(delete(Videogame))
             await session.execute(delete(User))
             await session.commit()
@@ -90,6 +96,7 @@ def admin_headers(client: TestClient) -> dict[str, str]:
                 hashed_password=hash_password(password),
                 is_active=True,
                 role=UserRole.admin,
+                email_verified_at=utc_now(),
             )
             session.add(user)
             await session.commit()

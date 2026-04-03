@@ -112,6 +112,22 @@ Docs (when OpenAPI is enabled for the current environment):
 
 Use `create_app()` / `create_app(Settings(...))` from [`app/main.py`](app/main.py) if you need a second app instance (e.g. tests with different settings).
 
+### Docker and Postgres (optional)
+
+Runtime dependencies are **pinned** in [`requirements.txt`](requirements.txt) (frozen 2026-04-03). [`docker-compose.yml`](docker-compose.yml) runs **Postgres 16** and the API; set a real `JWT_SECRET_KEY` in your environment when not only experimenting.
+
+```bash
+docker compose up --build
+```
+
+Apply migrations (one-off):
+
+```bash
+docker compose run --rm api alembic upgrade head
+```
+
+The API uses `DATABASE_URL=postgresql+asyncpg://...` inside Compose. **CI** still uses SQLite and does not require Docker.
+
 ## 6) Auth, permissions, and roles
 
 ### Register
@@ -119,6 +135,16 @@ Use `create_app()` / `create_app(Settings(...))` from [`app/main.py`](app/main.p
 `POST /api/v1/auth/register`
 
 - Always creates `user` (never auto-admin).
+- If `AUTH_REQUIRE_EMAIL_VERIFICATION=true`, the user is created with `email_verified=false` until `POST /api/v1/auth/verify-email`; a **console** or **SMTP** email is sent (`EMAIL_BACKEND`, `SMTP_*` in [`.env.example`](.env.example)).
+
+### Email verification
+
+`POST /api/v1/auth/verify-email` with JSON `{ "token": "..." }` (token from the email or console log).
+
+### Forgot / reset password
+
+- `POST /api/v1/auth/forgot-password` — body `{ "email": "..." }`; always responds **204** (no email enumeration).
+- `POST /api/v1/auth/reset-password` — body `{ "token": "...", "new_password": "..." }`.
 
 ### Login
 
@@ -194,9 +220,11 @@ All endpoints require Bearer token.
 
 List supports:
 
-- `offset` (default `0`)
+- `offset` (default `0`; ignored when `cursor` is set)
 - `limit` (default `20`, max `100`)
-- optional filters: `genre`, `platform`
+- optional filters: `genre`, `platform`, `q` (substring on title, case-insensitive), `min_price`, `max_price`
+- `sort`: `id_desc` (default), `id_asc`, `price_desc`, `price_asc`, `title_asc`, `title_desc`
+- `cursor`: opaque token from the previous response’s `next_cursor` for stable pagination (must use the same `sort`)
 
 ## 8) CI (GitHub Actions)
 
@@ -228,7 +256,7 @@ pytest -q
 
 To run tests **without** the coverage gate (faster while iterating): `pytest -q --no-cov`.
 
-Configuration: [`ruff.toml`](ruff.toml). Pytest + coverage options live in [`pyproject.toml`](pyproject.toml) (`pythonpath`, `addopts` with `--cov=app` and `--cov-fail-under=70`, `[tool.coverage.*]`). Coverage **omits** `app/core/*` and empty `app/__init__.py` (core is exercised indirectly via router tests).
+Configuration: [`ruff.toml`](ruff.toml). Pytest + coverage options live in [`pyproject.toml`](pyproject.toml) (`pythonpath`, `addopts` with `--cov=app` and `--cov-fail-under=70`, `[tool.coverage.*]`). Coverage **omits** `app/cli/*` and empty `app/__init__.py`.
 
 [`tests/conftest.py`](tests/conftest.py) points the app at a **temporary SQLite file** and **`JWT_SECRET_KEY`** for isolation, runs **`create_all`** once per session, and **truncates** `users` / `videogames` after each test. You do **not** need `alembic upgrade` before `pytest` (CI still runs Alembic to validate migrations).
 
@@ -243,6 +271,7 @@ app/
   core/
     config.py
     dependencies.py
+    email.py
     errors.py
     limiter.py
     middleware/
@@ -252,9 +281,11 @@ app/
     request_context.py
     security.py
   db/
+    datetime_utils.py
     session.py
   models/
     user.py
+    user_account_token.py
     videogame.py
   routers/
     auth.py
@@ -277,12 +308,15 @@ tests/
   integration/
     test_auth_and_permissions.py
     test_auth_router.py
+    test_auth_account_flows.py
     test_auth_cookie_refresh.py
     test_openapi.py
     test_openapi_production.py
     test_smoke.py
     test_videogames_router.py
 main.py
+docker-compose.yml
+Dockerfile
 pyproject.toml
 requirements-dev.txt
 ruff.toml
