@@ -8,7 +8,8 @@ Production-style FastAPI baseline with:
 - videogame CRUD
 - Alembic migrations
 - CLI to seed an admin user (`python -m app.cli create-admin`)
-- GitHub Actions CI (Ruff + Alembic upgrade)
+- GitHub Actions CI (Ruff, Alembic, pytest; Python 3.11–3.13 matrix; concurrency + least-privilege permissions)
+- Dependabot for `pip` and GitHub Actions
 
 ## 1) Requirements
 
@@ -31,6 +32,12 @@ Install dependencies:
 
 ```bash
 pip install -r requirements.txt
+```
+
+For linting and tests (optional locally; matches CI):
+
+```bash
+pip install -r requirements-dev.txt
 ```
 
 Create env file:
@@ -176,22 +183,35 @@ List supports:
 
 ## 8) CI (GitHub Actions)
 
-Workflow: `.github/workflows/ci.yml`
+Workflow: [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
 
-On push/PR to `main` or `master`:
+**Triggers:** push and pull request to `main` or `master`, plus **workflow_dispatch** (manual run from the Actions tab).
 
-- `ruff check` + `ruff format --check` on `app`, `alembic`, `main.py`
-- `alembic upgrade head` against a temporary SQLite URL (`DATABASE_URL` in the workflow)
+**Hardening:**
 
-Local parity:
+- `permissions: contents: read` (least privilege)
+- **Concurrency:** new runs for the same ref cancel in-progress runs (saves minutes on busy PRs)
+
+**Jobs:**
+
+1. **lint** — Python 3.12, installs only [`requirements-dev.txt`](requirements-dev.txt) (pinned **Ruff**), runs `ruff check` and `ruff format --check` on `app`, `alembic`, `main.py`, `tests`.
+2. **test** — matrix **Python 3.11, 3.12, 3.13**; installs app + dev deps; `alembic upgrade head`; **`pytest`** smoke tests (`tests/`).
+
+**Dependabot:** [`.github/dependabot.yml`](.github/dependabot.yml) opens weekly PRs for `pip` and `github-actions`.
+
+Local parity (after `alembic upgrade head` so `/health` can hit the DB):
 
 ```bash
-pip install ruff
-ruff check app alembic main.py
-ruff format --check app alembic main.py
+pip install -r requirements.txt -r requirements-dev.txt
+alembic upgrade head
+ruff check app alembic main.py tests
+ruff format --check app alembic main.py tests
+pytest -q
 ```
 
-Configuration: `ruff.toml`.
+Configuration: [`ruff.toml`](ruff.toml). Pytest discovers tests from [`pyproject.toml`](pyproject.toml) (`pythonpath = ["."]`) so imports work even when your IDE runs tests with a non-repo-root working directory.
+
+**Branch protection (recommended):** in GitHub repo settings, require the CI workflow to pass before merging to `main`.
 
 ## 9) Project layout
 
@@ -220,7 +240,15 @@ app/
 alembic/
   env.py
   versions/
+.github/
+  workflows/
+    ci.yml
+  dependabot.yml
+tests/
+  test_smoke.py
 main.py
+pyproject.toml
+requirements-dev.txt
 ruff.toml
 ```
 
