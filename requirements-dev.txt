@@ -1,4 +1,4 @@
 # Dev / CI tooling (pin versions so CI does not change behavior unexpectedly)
-ruff==0.11.4
+ruff==0.15.14
 pytest==8.3.5
 httpx==0.28.1
